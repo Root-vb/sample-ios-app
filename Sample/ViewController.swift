@@ -9,7 +9,7 @@
 import UIKit
 import Instamojo
 
-class ViewController: UIViewController, OrderRequestCallBack, UITextFieldDelegate {
+class ViewController: UIViewController, OrderRequestCallBack,  UITextFieldDelegate {
     
     @IBOutlet var payButton: UIButton!
     @IBOutlet var scrollView: UIScrollView!
@@ -41,7 +41,7 @@ class ViewController: UIViewController, OrderRequestCallBack, UITextFieldDelegat
     override func viewDidLoad() {
         super.viewDidLoad()
         addNotificationToRecievePaymentCompletion()
-        
+
        //Add Loader/Spinner To the current view
         spinner = Spinner(text : "Please Wait..")
         spinner.hide()
@@ -61,14 +61,15 @@ class ViewController: UIViewController, OrderRequestCallBack, UITextFieldDelegat
         self.textField = self.nameTextField
 
         //Set observer to handle keybaord navigations
-        NotificationCenter.default.addObserver(self, selector: #selector(keyboardWillShow), name: .UIKeyboardWillShow, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(keyboardWillShow), name: UIResponder.keyboardWillShowNotification, object: nil)
+
     }
     
     func addNotificationToRecievePaymentCompletion(){
         NotificationCenter.default.addObserver(self, selector: #selector(self.paymentCompletionCallBack), name: NSNotification.Name("INSTAMOJO"), object: nil)
     }
     
-    func paymentCompletionCallBack() {
+    @objc func paymentCompletionCallBack() {
         if UserDefaults.standard.value(forKey: "USER-CANCELLED") != nil {
             self.showAlert(errorMessage: "Transaction cancelled by user, back button was pressed.")
         }
@@ -87,8 +88,8 @@ class ViewController: UIViewController, OrderRequestCallBack, UITextFieldDelegat
         }
     }
     
-    func keyboardWillShow(notification: NSNotification) {
-        if let keyboardSize = (notification.userInfo?[UIKeyboardFrameBeginUserInfoKey] as? NSValue)?.cgRectValue {
+    @objc func keyboardWillShow(notification: NSNotification) {
+        if let keyboardSize = (notification.userInfo?[UIResponder.keyboardFrameBeginUserInfoKey] as? NSValue)?.cgRectValue {
             keyboardHeight = Int(keyboardSize.height) - 100
         }
     }
@@ -117,27 +118,38 @@ class ViewController: UIViewController, OrderRequestCallBack, UITextFieldDelegat
         payButton.isEnabled = false
         self.textField.resignFirstResponder()
         scrollView.setContentOffset(CGPoint.init(x: 0, y: 0), animated: true)
+    
         fetchOrder()
     }
     
     func fetchOrder() {
         spinner.show()
-        let url: String = "https://sample-sdk-server.instamojo.com/create"
+        let url: String = "https://sample-sdk-server.instamojo.com/order"
         let request = NSMutableURLRequest(url: NSURL(string: url)! as URL)
         request.httpMethod = "POST"
         let session = URLSession.shared
-        let params = ["env": environment[selectedEnv.text!]]
-        request.setBodyContent(parameters: params)
-        request.addValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        var params : NSMutableDictionary = [:]
+        params["env"] = environment[selectedEnv.text!]!
+        params["buyer_name"] = nameTextField.text!
+        params["buyer_email"] = emailTextField.text!
+        params["buyer_phone"] = phoneNumberTextfield.text!
+        params["amount"] = amountTextField.text!
+        params["description"] = descriptionTextField.text!
+        print(params)
+
+        let jsonData = try? JSONSerialization.data(withJSONObject: params)
+        request.httpBody = jsonData
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
         request.addValue("application/json", forHTTPHeaderField: "Accept")
         
         let task = session.dataTask(with: request as URLRequest, completionHandler: {data, _, error -> Void in
             DispatchQueue.main.async {
                 self.spinner.hide()
             }
+            
             if error == nil {
                 do {
-                    if let jsonResponse = try JSONSerialization.jsonObject(with: data!, options: []) as?  [String:Any] {
+                    if let jsonResponse = try JSONSerialization.jsonObject(with: data!, options: []) as? NSDictionary {
                         Logger.logDebug(tag: "Dictonary", message: String(describing: jsonResponse))
                         if jsonResponse["error"] != nil {
                             if let errorMessage = jsonResponse["error"] as? String {
@@ -146,25 +158,27 @@ class ViewController: UIViewController, OrderRequestCallBack, UITextFieldDelegat
                                 self.showAlert(errorMessage: errorMessage)
                             }
                         } else {
-                            
+
                             Logger.logDebug(tag: " Sample - Fetch Token", message: "Response: \(jsonResponse)")
-                            
-                            let transactionID = jsonResponse["transaction_id"] as? String
-                            let accessToken = jsonResponse["access_token"] as? String
-                            
-                            //Create an order using the transaction_id and access_token recieved
-                            self.createOrder(transactionID: transactionID!, accessToken: accessToken!)
+
+                            let orderId = jsonResponse["order_id"] as! String
+
+                            self.fetchOrderFromInstamojo(orderID: orderId)
                         }
                     }
                 } catch {
-                     self.payButton.isEnabled = true
+                    DispatchQueue.main.async {
+                        self.payButton.isEnabled = true
+                    }
                     Logger.logError(tag: " Sample - Fetch Token", message: String(describing: error))
-                    self.showAlert(errorMessage: "Failed to fetch order tokens")
+                    self.showAlert(errorMessage: "Failed to fetch order tokens CATCH")
                 }
             } else {
-                self.payButton.isEnabled = true
+                DispatchQueue.main.async {
+                    self.payButton.isEnabled = true
+                }
                 print(error!.localizedDescription)
-                self.showAlert(errorMessage: "Failed to fetch order tokens")
+                self.showAlert(errorMessage: "Failed to fetch order tokens ELSE")
             }
         })
         task.resume()
@@ -214,9 +228,11 @@ class ViewController: UIViewController, OrderRequestCallBack, UITextFieldDelegat
     }
     
     func showAlert(errorMessage: String) {
-        let alert = UIAlertController(title: "", message: errorMessage, preferredStyle: UIAlertControllerStyle.alert)
-        alert.addAction(UIAlertAction(title: "Ok", style: UIAlertActionStyle.default, handler: nil))
-        self.present(alert, animated: true, completion: nil)
+        DispatchQueue.main.async {
+            let alert = UIAlertController(title: "", message: errorMessage, preferredStyle: UIAlertController.Style.alert)
+            alert.addAction(UIAlertAction(title: "Ok", style: UIAlertAction.Style.default, handler: nil))
+            self.present(alert, animated: true, completion: nil)
+        }
     }
     
     //To asssing next responder
@@ -334,7 +350,7 @@ class ViewController: UIViewController, OrderRequestCallBack, UITextFieldDelegat
     
     func fetchOrderFromInstamojo(orderID : String){
         spinner.show()
-        let request = Request.init(orderID: orderID, accessToken: self.accessToken, orderRequestCallBack: self)
+        let request = Request.init(orderID: orderID, accessToken: "", orderRequestCallBack: self)
         request.execute()
     }
     
